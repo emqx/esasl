@@ -1,0 +1,13 @@
+{application, sasl,
+ [{description, "SASL"},
+  {vsn, "git"},
+  {modules, []},
+  {registered, []},
+  {applications, [kernel,stdlib,pbkdf2, ekka]},
+  {env, []},
+  {licenses, ["Apache-2.0"]},
+  {maintainers, ["EMQ X Team <contact@emqx.io>"]},
+  {links, [{"Homepage", "https://emqx.io/"},
+           {"Github", "https://github.com/emqx/sasl"}
+          ]}
+ ]}.
