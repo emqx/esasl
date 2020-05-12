@@ -16,134 +16,59 @@
 
 -module(sasl_scram).
 
--define(SCRAM_AUTH_TAB, scram_auth).
-
--export([ init/0
-        , add/3
-        , add/4
-        , update/3
-        , update/4
-        , delete/1
-        , lookup/1
+-export([ init/4
         , check/2
         , make_client_first/1]).
-
--record(?SCRAM_AUTH_TAB, {
-            username,
-            stored_key,
-            server_key,
-            salt,
-            iteration_count :: integer()
-        }).
 
 -ifdef(TEST).
 -compile(export_all).
 -compile(nowarn_export_all).
 -endif.
 
-init() ->
-    ok = ekka_mnesia:create_table(?SCRAM_AUTH_TAB, [
-            {disc_copies, [node()]},
-            {attributes, record_info(fields, ?SCRAM_AUTH_TAB)},
-            {storage_properties, [{ets, [{read_concurrency, true}]}]}]),
-    ok = ekka_mnesia:copy_table(?SCRAM_AUTH_TAB, disc_copies).
-
-add(Username, Password, Salt) ->
-    add(Username, Password, Salt, 4096).
-
-add(Username, Password, Salt, IterationCount) ->
-    case lookup(Username) of
-        {error, not_found} ->
-            do_add(Username, Password, Salt, IterationCount);
-        _ ->
-            {error, already_existed}
-    end.
-
-update(Username, Password, Salt) ->
-    update(Username, Password, Salt, 4096).
-
-update(Username, Password, Salt, IterationCount) ->
-    case lookup(Username) of
-        {error, not_found} ->
-            {error, not_found};
-        _ ->
-            do_add(Username, Password, Salt, IterationCount)
-    end.
-
-delete(Username) ->
-    ret(mnesia:transaction(fun mnesia:delete/3, [?SCRAM_AUTH_TAB, Username, write])).
-
-lookup(Username) ->
-    case mnesia:dirty_read(?SCRAM_AUTH_TAB, Username) of
-        [#scram_auth{username = Username,
-                     stored_key = StoredKey,
-                     server_key = ServerKey,
-                     salt = Salt,
-                     iteration_count = IterationCount}] ->
-            {ok, #{username => Username,
-                   stored_key => StoredKey,
-                   server_key => ServerKey,
-                   salt => Salt,
-                   iteration_count => IterationCount}};
-        [] ->
-            {error, not_found}
-    end.
-
-do_add(Username, Password, Salt, IterationCount) ->
+init(Username, Password, Salt, IterationCount) ->
     SaltedPassword = pbkdf2_sha_1(Password, Salt, IterationCount),
     ClientKey = client_key(SaltedPassword),
     ServerKey = server_key(SaltedPassword),
     StoredKey = crypto:hash(sha, ClientKey),
-    AuthInfo = #scram_auth{username = Username,
-                           stored_key = base64:encode(StoredKey),
-                           server_key = base64:encode(ServerKey),
-                           salt = base64:encode(Salt),
-                           iteration_count = IterationCount},
-    ret(mnesia:transaction(fun mnesia:write/3, [?SCRAM_AUTH_TAB, AuthInfo, write])).
+    #{username => Username,
+      password => Password,
+      stored_key => base64:encode(StoredKey),
+      server_key => base64:encode(ServerKey),
+      salt => base64:encode(Salt),
+      iteration_count => IterationCount}.
 
-ret({atomic, ok})     -> ok;
-ret({aborted, Error}) -> {error, Error}.
-
-check(Data, Cache) when map_size(Cache) =:= 0 ->
-    check_client_first(Data);
-check(Data, Cache) ->
-    case maps:get(next_step, Cache, undefined) of
-        undefined -> check_server_first(Data, Cache);
-        check_client_final -> check_client_final(Data, Cache);
-        check_server_final -> check_server_final(Data, Cache)
+check(Data, Context) ->
+    case {maps:get(next_step, Context, undefined), maps:get(client_first, Context, undefined)} of
+        {undefined, undefined} -> check_client_first(Data, Context);
+        {undefined, _} -> check_server_first(Data, Context);
+        {check_client_final, _} -> check_client_final(Data, Context);
+        {check_server_final, _} -> check_server_final(Data, Context)
     end.
 
-check_client_first(ClientFirst) ->
+check_client_first(ClientFirst, Context = #{stored_key := _StoredKey0,
+                                            server_key := _ServerKey0,
+                                            salt := Salt0,
+                                            iteration_count := IterationCount} ) ->
     ClientFirstWithoutHeader = without_header(ClientFirst),
     Attributes = parse(ClientFirstWithoutHeader),
-    Username = proplists:get_value(username, Attributes),
     ClientNonce = proplists:get_value(nonce, Attributes),
-    case lookup(Username) of
-        {error, not_found} ->
-            {error, not_found};
-        {ok, #{stored_key := StoredKey0,
-               server_key := ServerKey0,
-               salt := Salt0,
-               iteration_count := IterationCount}} ->
-            StoredKey = base64:decode(StoredKey0), 
-            ServerKey = base64:decode(ServerKey0),
-            Salt = base64:decode(Salt0),
-            ServerNonce = nonce(),
-            Nonce = list_to_binary(binary_to_list(ClientNonce) ++ binary_to_list(ServerNonce)),
-            ServerFirst = make_server_first(Nonce, Salt, IterationCount),
-            {continue, ServerFirst, #{next_step => check_client_final,
-                                      client_first_without_header => ClientFirstWithoutHeader,
-                                      server_first => ServerFirst,
-                                      stored_key => StoredKey,
-                                      server_key => ServerKey,
-                                      nonce => Nonce}}
-    end.
+    Salt = base64:decode(Salt0),
+    ServerNonce = nonce(),
+    Nonce = list_to_binary(binary_to_list(ClientNonce) ++ binary_to_list(ServerNonce)),
+    ServerFirst = make_server_first(Nonce, Salt, IterationCount),
+    {continue, ServerFirst, maps:merge(Context, #{next_step => check_client_final,
+                                                  client_first => ClientFirst,
+                                                  server_first => ServerFirst,
+                                                  nonce => Nonce})}.
 
-check_client_final(ClientFinal, #{client_first_without_header := ClientFirstWithoutHeader,
+check_client_final(ClientFinal, #{client_first := ClientFirst,
                                   server_first := ServerFirst,
-                                  server_key := ServerKey,
-                                  stored_key := StoredKey,
+                                  server_key := ServerKey0,
+                                  stored_key := StoredKey0,
                                   nonce := OldNonce}) ->
+    StoredKey = base64:decode(StoredKey0), 
+    ServerKey = base64:decode(ServerKey0),
+    ClientFirstWithoutHeader = without_header(ClientFirst),
     ClientFinalWithoutProof = without_proof(ClientFinal),
     Attributes = parse(ClientFinal),
     ClientProof = base64:decode(proplists:get_value(proof, Attributes)),
@@ -161,8 +86,8 @@ check_client_final(ClientFinal, #{client_first_without_header := ClientFirstWith
             {error, invalid_client_final}
     end.
 
-check_server_first(ServerFirst, #{password := Password,
-                                  client_first := ClientFirst}) ->
+check_server_first(ServerFirst, Context = #{password := Password,
+                                            client_first := ClientFirst}) ->
     Attributes = parse(ServerFirst),
     Nonce = proplists:get_value(nonce, Attributes),
     ClientFirstWithoutHeader = without_header(ClientFirst),
@@ -178,14 +103,12 @@ check_server_first(ServerFirst, #{password := Password,
     ClientFinal = serialize([{channel_binding, <<"biws">>},
                              {nonce, Nonce},
                              {proof, ClientProof}]),
-    {continue, ClientFinal, #{next_step => check_server_final,
-                              password => Password,
-                              client_first => ClientFirst,
-                              server_first => ServerFirst}}.
+    {continue, ClientFinal, maps:merge(Context, #{next_step => check_server_final, 
+                                                  server_first => ServerFirst})}.
 
-check_server_final(ServerFinal, #{password := Password,
-                                  client_first := ClientFirst,
-                                  server_first := ServerFirst}) ->
+check_server_final(ServerFinal, Context = #{password := Password,
+                                            client_first := ClientFirst,
+                                            server_first := ServerFirst}) ->
     NewAttributes = parse(ServerFinal),
     Attributes = parse(ServerFirst),
     Nonce = proplists:get_value(nonce, Attributes),
@@ -199,7 +122,7 @@ check_server_final(ServerFinal, #{password := Password,
     ServerSignature = hmac(ServerKey, Auth),
     case base64:encode(ServerSignature) =:= proplists:get_value(verifier, NewAttributes) of
         true ->
-            {ok, <<>>, #{}};
+            {ok, <<>>, Context};
         false -> 
             {stop, invalid_server_final}
     end.

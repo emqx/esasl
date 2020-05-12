@@ -24,55 +24,26 @@
 
 init_per_suite(Config) ->
     application:ensure_all_started(sasl),
-    ekka_mnesia:copy_schema(node()),
-    sasl_scram:init(),
     Config.
 
 end_per_suite(_Config) ->
     application:stop(sasl).
 
-all() -> [t_crud, t_scram].
+all() -> [t_scram].
 
-t_crud(_) ->
+t_scram(_) ->
+    Method = <<"SCRAM-SHA-1">>,
     Username = <<"test">>,
     Password = <<"public">>,
     Salt = <<"emqx">>,
     IterationCount = 4096,
-    EncodedSalt = base64:encode(Salt),
-    SaltedPassword = sasl_scram:pbkdf2_sha_1(Password, Salt, IterationCount),
-    ClientKey = sasl_scram:client_key(SaltedPassword),
-    ServerKey = base64:encode(sasl_scram:server_key(SaltedPassword)),
-    StoredKey = base64:encode(crypto:hash(sha, ClientKey)),
 
-    {error, not_found} = sasl_scram:lookup(Username),
-    ok = sasl_scram:add(Username, Password, Salt),
-    {error, already_existed} = sasl_scram:add(Username, Password, Salt),
-
-    {ok, #{username := Username,
-           stored_key := StoredKey,
-           server_key := ServerKey,
-           salt := EncodedSalt,
-           iteration_count := IterationCount}} = sasl_scram:lookup(Username),
-
-    NewSalt = <<"new salt">>,
-    NewEncodedSalt = base64:encode(NewSalt),
-    sasl_scram:update(Username, Password, NewSalt),
-    {ok, #{username := Username,
-           salt := NewEncodedSalt}} = sasl_scram:lookup(Username),
-    sasl_scram:delete(Username),
-    {error, not_found} = sasl_scram:lookup(Username).
-
-t_scram(_) ->
-    Username = <<"test">>,
-    Password = <<"public">>,
-    Salt = <<"emqx">>,
-    ok = sasl_scram:add(Username, Password, Salt),
-    ClientFirst = sasl_scram:make_client_first(Username),
-
-    {continue, ServerFirst, Cache} = sasl_scram:check(ClientFirst, #{}),
-
-    {continue, ClientFinal, ClientCache} = sasl_scram:check(ServerFirst, #{password => Password, client_first => ClientFirst}),
-
-    {ok, ServerFinal, #{}} = sasl_scram:check(ClientFinal, Cache),
-
-    {ok,<<>>,#{}} = sasl_scram:check(ServerFinal, ClientCache).
+    Context0 = sasl_app:init(Method, #{username => Username,
+                                       password => Password,
+                                       salt => Salt,
+                                       iteration_count => IterationCount}),
+    ClientFirst = sasl_app:apply(Method, Context0),
+    {continue, ServerFirst, Context1} = sasl_app:check(Method, ClientFirst, Context0),
+    {continue, ClientFinal, Context2} = sasl_app:check(Method, ServerFirst, maps:merge(Context0, #{client_first => ClientFirst})),
+    {ok, ServerFinal, _} = sasl_app:check(Method, ClientFinal, Context1),
+    {ok, <<>>, _} = sasl_app:check(Method, ServerFinal, Context2).

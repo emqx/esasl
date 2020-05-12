@@ -1,12 +1,4 @@
-[{<<"ekka">>,
-  {git,"https://github.com/emqx/ekka.git",
-       {ref,"e7f550ae8fc9d9dc64ba69dffd11a0d335172c86"}},
-  0},
- {<<"jiffy">>,
-  {git,"https://github.com/emqx/jiffy",
-       {ref,"43584606a37d13b47ef7b88ac11837a728fcadb6"}},
-  1},
- {<<"pbkdf2">>,
+[{<<"pbkdf2">>,
   {git,"https://github.com/emqx/erlang-pbkdf2.git",
        {ref,"419143f1d3c56f10757d3fc683bba21ecc615434"}},
   0}].
