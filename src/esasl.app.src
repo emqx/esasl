@@ -1,5 +1,5 @@
-{application, sasl,
- [{description, "SASL"},
+{application, esasl,
+ [{description, "Simple Authentication and Security Layer"},
   {vsn, "git"},
   {modules, []},
   {registered, []},
@@ -8,6 +8,6 @@
   {licenses, ["Apache-2.0"]},
   {maintainers, ["EMQ X Team <contact@emqx.io>"]},
   {links, [{"Homepage", "https://emqx.io/"},
-           {"Github", "https://github.com/emqx/sasl"}
+           {"Github", "https://github.com/emqx/esasl"}
           ]}
  ]}.

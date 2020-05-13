@@ -14,7 +14,7 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
--module(sasl_scram_SUITE).
+-module(esasl_scram_SUITE).
 
 -compile(export_all).
 -compile(nowarn_export_all).
@@ -23,11 +23,11 @@
 -include_lib("eunit/include/eunit.hrl").
 
 init_per_suite(Config) ->
-    application:ensure_all_started(sasl),
+    application:ensure_all_started(esasl),
     Config.
 
 end_per_suite(_Config) ->
-    application:stop(sasl).
+    application:stop(esasl).
 
 all() -> [t_scram].
 
@@ -38,12 +38,12 @@ t_scram(_) ->
     Salt = <<"emqx">>,
     IterationCount = 4096,
 
-    Context0 = sasl_app:init(Method, #{username => Username,
+    Context0 = esasl_app:init(Method, #{username => Username,
                                        password => Password,
                                        salt => Salt,
                                        iteration_count => IterationCount}),
-    ClientFirst = sasl_app:apply(Method, Context0),
-    {continue, ServerFirst, Context1} = sasl_app:check(Method, ClientFirst, Context0),
-    {continue, ClientFinal, Context2} = sasl_app:check(Method, ServerFirst, maps:merge(Context0, #{client_first => ClientFirst})),
-    {ok, ServerFinal, _} = sasl_app:check(Method, ClientFinal, Context1),
-    {ok, <<>>, _} = sasl_app:check(Method, ServerFinal, Context2).
+    ClientFirst = esasl_app:apply(Method, Context0),
+    {continue, ServerFirst, Context1} = esasl_app:check(Method, ClientFirst, Context0),
+    {continue, ClientFinal, Context2} = esasl_app:check(Method, ServerFirst, maps:merge(Context0, #{client_first => ClientFirst})),
+    {ok, ServerFinal, _} = esasl_app:check(Method, ClientFinal, Context1),
+    {ok, <<>>, _} = esasl_app:check(Method, ServerFinal, Context2).

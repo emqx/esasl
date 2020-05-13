@@ -10,7 +10,7 @@ compile:
 	$(REBAR) compile
 
 ct: compile
-	$(REBAR) as test ct -v --name emqx_sasl_ct@127.0.0.1
+	$(REBAR) as test ct -v 
 
 eunit: compile
 	$(REBAR) as test eunit

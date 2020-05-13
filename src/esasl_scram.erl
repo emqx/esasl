@@ -14,7 +14,7 @@
 %% limitations under the License.
 %%--------------------------------------------------------------------
 
--module(sasl_scram).
+-module(esasl_scram).
 
 -export([ init/4
         , check/2

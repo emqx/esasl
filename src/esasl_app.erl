@@ -1,9 +1,9 @@
 %%%-------------------------------------------------------------------
-%% @doc sasl public API
+%% @doc esasl public API
 %% @end
 %%%-------------------------------------------------------------------
 
--module(sasl_app).
+-module(esasl_app).
 
 -export([ init/2
         , apply/2
@@ -14,19 +14,19 @@ init(<<"SCRAM-SHA-1">>, #{username := Username,
                           password := Password,
                           salt := Salt,
                           iteration_count := IterationCount}) ->
-    sasl_scram:init(Username, Password, Salt, IterationCount);
+    esasl_scram:init(Username, Password, Salt, IterationCount);
 
 init(_Method, _Context) ->
     {error, init_failed}.
 
 apply(<<"SCRAM-SHA-1">>, _Context = #{username := Username}) ->
-    sasl_scram:make_client_first(Username);
+    esasl_scram:make_client_first(Username);
 
 apply(_Method, _Context) ->
     {error, unsupported_methods}.
 
 check(<<"SCRAM-SHA-1">>, Data, Context) ->
-    safe_execute(fun sasl_scram:check/2, [Data, Context]);
+    safe_execute(fun esasl_scram:check/2, [Data, Context]);
 
 check(_Method, _Data, _Context) ->
     {error, authentication_failed}.
