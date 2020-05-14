@@ -3,11 +3,12 @@
 %% @end
 %%%-------------------------------------------------------------------
 
--module(esasl_app).
+-module(esasl).
 
 -export([ init/2
         , apply/2
-        , check/3
+        , check_client_data/3
+        , check_server_data/3
         , supported/0]).
 
 init(<<"SCRAM-SHA-1">>, #{username := Username,
@@ -25,10 +26,16 @@ apply(<<"SCRAM-SHA-1">>, _Context = #{username := Username}) ->
 apply(_Method, _Context) ->
     {error, unsupported_methods}.
 
-check(<<"SCRAM-SHA-1">>, Data, Context) ->
-    safe_execute(fun esasl_scram:check/2, [Data, Context]);
+check_client_data(<<"SCRAM-SHA-1">>, Data, Context) ->
+    safe_execute(fun esasl_scram:check_client_data/2, [Data, Context]);
 
-check(_Method, _Data, _Context) ->
+check_client_data(_Method, _Data, _Context) ->
+    {error, authentication_failed}.
+
+check_server_data(<<"SCRAM-SHA-1">>, Data, Context) ->
+    safe_execute(fun esasl_scram:check_server_data/2, [Data, Context]);
+
+check_server_data(_Method, _Data, _Context) ->
     {error, authentication_failed}.
 
 supported() ->

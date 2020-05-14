@@ -38,12 +38,12 @@ t_scram(_) ->
     Salt = <<"emqx">>,
     IterationCount = 4096,
 
-    Context0 = esasl_app:init(Method, #{username => Username,
+    Context0 = esasl:init(Method, #{username => Username,
                                        password => Password,
                                        salt => Salt,
                                        iteration_count => IterationCount}),
-    ClientFirst = esasl_app:apply(Method, Context0),
-    {continue, ServerFirst, Context1} = esasl_app:check(Method, ClientFirst, Context0),
-    {continue, ClientFinal, Context2} = esasl_app:check(Method, ServerFirst, maps:merge(Context0, #{client_first => ClientFirst})),
-    {ok, ServerFinal, _} = esasl_app:check(Method, ClientFinal, Context1),
-    {ok, <<>>, _} = esasl_app:check(Method, ServerFinal, Context2).
+    ClientFirst = esasl:apply(Method, Context0),
+    {continue, ServerFirst, Context1} = esasl:check_client_data(Method, ClientFirst, Context0),
+    {continue, ClientFinal, Context2} = esasl:check_server_data(Method, ServerFirst, maps:merge(Context0, #{client_first => ClientFirst})),
+    {ok, ServerFinal, _} = esasl:check_client_data(Method, ClientFinal, Context1),
+    {ok, <<>>, _} = esasl:check_server_data(Method, ServerFinal, Context2).

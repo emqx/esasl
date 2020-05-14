@@ -17,7 +17,8 @@
 -module(esasl_scram).
 
 -export([ init/4
-        , check/2
+        , check_client_data/2
+        , check_server_data/2
         , make_client_first/1]).
 
 -ifdef(TEST).
@@ -37,12 +38,17 @@ init(Username, Password, Salt, IterationCount) ->
       salt => base64:encode(Salt),
       iteration_count => IterationCount}.
 
-check(Data, Context) ->
-    case {maps:get(next_step, Context, undefined), maps:get(client_first, Context, undefined)} of
-        {undefined, undefined} -> check_client_first(Data, Context);
-        {undefined, _} -> check_server_first(Data, Context);
-        {check_client_final, _} -> check_client_final(Data, Context);
-        {check_server_final, _} -> check_server_final(Data, Context)
+check_client_data(Data, Context) ->
+    case maps:get(next_step, Context, undefined) of
+        undefined -> check_client_first(Data, Context);
+        _ -> check_client_final(Data, Context)
+    end.
+
+
+check_server_data(Data, Context) ->
+    case maps:get(next_step, Context, undefined) of
+        undefined -> check_server_first(Data, Context);
+        _ -> check_server_final(Data, Context)
     end.
 
 check_client_first(ClientFirst, Context = #{stored_key := _StoredKey0,
