@@ -13,5 +13,6 @@ deps
 
 # rebar 3
 .rebar3
+rebar.lock
 _build/
 _checkouts/
