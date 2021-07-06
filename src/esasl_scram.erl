@@ -262,7 +262,7 @@ parse_attribute(server_error_or_verifier, Bin, Attributes) ->
     parse_server_error_or_verifier(Bin, Attributes).
 
 parse_gs2_cbind_flag(<<"p=", _/binary>>, _) ->
-    {error, 'server-does-support-channel-binding'};
+    {error, 'channel-binding-not-supported'};
 parse_gs2_cbind_flag(<<"n">>, Attributes) ->
     {ok, Attributes};
 parse_gs2_cbind_flag(<<"y">>, Attributes) ->
@@ -428,11 +428,7 @@ gen_salt() ->
 
 %% 0x21-2B, 0x2D-7E
 nonce() ->
-    Nonce = [case crypto:rand_uniform(33, 127) of
-                 44 -> 45;
-                 N -> N
-             end || _ <- lists:seq(1,15)],
-    list_to_binary(Nonce).
+    list_to_binary([rand_uniform(33, 127) || _ <- lists:seq(1,15)]).
 
 salted_password(Alg, Password, Salt, IterationCount) ->
     {ok, Bin} = pbkdf2:pbkdf2({hmac, Alg}, Password, Salt, IterationCount),
@@ -465,3 +461,9 @@ hmac(Algorithm, Key, Data) ->
 hmac(Algorithm, Key, Data) ->
     crypto:hmac(Algorithm, Key, Data).
 -endif.
+
+rand_uniform(Lo, Hi) ->
+    case rand:uniform(Hi - Lo) + Lo of
+        44 -> 45;
+        N -> N
+    end.
