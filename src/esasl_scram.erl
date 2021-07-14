@@ -33,7 +33,7 @@
 %%------------------------------------------------------------------------------
 
 generate_user_credential(UserID, Password, #{algorithm := Algorithm,
-                                            iteration_count := IterationCount}) ->
+                                             iteration_count := IterationCount}) ->
     Salt = gen_salt(),
     SaltedPassword = salted_password(Algorithm, Password, Salt, IterationCount),
     ClientKey = client_key(Algorithm, SaltedPassword),
@@ -105,10 +105,10 @@ check_client_final_message(ClientFinalmessage, #{client_first_message_bare := Cl
                     ServerFinalMessage = server_final_message(verifier, ServerSignature),
                     {ok, ServerFinalMessage};
                 false ->
-                    {error, todo}
+                    {error, 'other-error'}
             end;
         {error, Reason} ->
-            {stop, Reason}
+            {error, Reason}
     end.
 
 check_server_first_message(ServerFirstMessage, #{client_first_message := ClientFirstMessage,
@@ -155,9 +155,9 @@ check_server_final_message(ServerFinalMessage,
             ServerKey = server_key(Algorithm, SaltedPassword),
             case Verifier =:= hmac(Algorithm, ServerKey, AuthMessage) of
                 true ->
-                    {ok, todo};
+                    ok;
                 false ->
-                    {error, todo}
+                    {error, 'other-error'}
             end;
         {ok, #{error := _Reason}} ->
             ok;
