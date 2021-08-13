@@ -16,9 +16,7 @@
 
 -module(esasl_scram).
 
--include("esasl_scram.hrl").
-
--export([generate_user_credential/3]).
+-export([generate_authentication_info/2]).
 
 -export([client_first_message/1]).
 
@@ -32,17 +30,14 @@
 %% APIs
 %%------------------------------------------------------------------------------
 
-generate_user_credential(UserID, Password, #{algorithm := Algorithm,
-                                             iteration_count := IterationCount}) ->
+generate_authentication_info(Password, #{algorithm := Algorithm,
+                                         iteration_count := IterationCount}) ->
     Salt = gen_salt(),
     SaltedPassword = salted_password(Algorithm, Password, Salt, IterationCount),
     ClientKey = client_key(Algorithm, SaltedPassword),
     ServerKey = server_key(Algorithm, SaltedPassword),
     StoredKey = stored_key(Algorithm, ClientKey),
-    #scram_user_credentail{user_id    = UserID,
-                           stored_key = StoredKey,
-                           server_key = ServerKey,
-                           salt       = Salt}.
+    {StoredKey, ServerKey, Salt}.
 
 client_first_message(Username) ->
     iolist_to_binary([gs2_header(), client_first_message_bare(Username)]).
@@ -59,26 +54,22 @@ client_first_message(Username) ->
 %% ServerSignature := HMAC(ServerKey, AuthMessage)
 
 check_client_first_message(ClientFirstMessage, #{iteration_count := IterationCount,
-                                                 lookup := LookupFun}) ->
+                                                 retrieve := RetrieveFun}) ->
     case parse_client_first_message(ClientFirstMessage) of
         {ok, #{username := Username,
                nonce := ClientNonce}} ->
-            case LookupFun(Username) of
+            case RetrieveFun(Username) of
                 {error, _} ->
                     ignore;
-                {ok, #scram_user_credentail{stored_key = StoredKey,
-                                            server_key = ServerKey,
-                                            salt = Salt}} ->
+                {ok, #{stored_key := _, server_key := _, salt := Salt} = Retrieved} ->
                     ClientFirstMessageBare = peek_client_first_message_bare(ClientFirstMessage),
                     ServerNonce = nonce(),
                     Nonce = iolist_to_binary([ClientNonce, ServerNonce]),
                     ServerFirstMessage = server_first_message(Nonce, Salt, IterationCount),
-                    {continue, ServerFirstMessage, #{next_step                 => client_final,
-                                                     client_first_message_bare => ClientFirstMessageBare,
-                                                     server_first_message      => ServerFirstMessage,
-                                                     stored_key                => StoredKey,
-                                                     server_key                => ServerKey,
-                                                     nonce                     => Nonce}}
+                    {continue, ServerFirstMessage, maps:merge(#{next_step                 => client_final,
+                                                                client_first_message_bare => ClientFirstMessageBare,
+                                                                server_first_message      => ServerFirstMessage,
+                                                                nonce                     => Nonce}, Retrieved)}
             end;
         {error, Reason} ->
             {error, Reason}
