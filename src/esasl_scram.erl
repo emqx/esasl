@@ -26,6 +26,11 @@
         , check_server_final_message/2
         ]).
 
+-ifdef(TEST).
+-compile(export_all).
+-compile(nowarn_export_all).
+-endif.
+
 %%------------------------------------------------------------------------------
 %% APIs
 %%------------------------------------------------------------------------------
@@ -57,7 +62,8 @@ check_client_first_message(ClientFirstMessage, #{iteration_count := IterationCou
                                                  retrieve := RetrieveFun}) ->
     case parse_client_first_message(ClientFirstMessage) of
         {ok, #{username := Username,
-               nonce := ClientNonce}} ->
+               nonce := ClientNonce,
+               gs2_cbind_flag := GS2CBindFlag}} ->
             case RetrieveFun(Username) of
                 {error, _} ->
                     ignore;
@@ -69,7 +75,8 @@ check_client_first_message(ClientFirstMessage, #{iteration_count := IterationCou
                     {continue, ServerFirstMessage, maps:merge(#{next_step                 => client_final,
                                                                 client_first_message_bare => ClientFirstMessageBare,
                                                                 server_first_message      => ServerFirstMessage,
-                                                                nonce                     => Nonce}, Retrieved)}
+                                                                nonce                     => Nonce,
+                                                                gs2_cbind_flag            => GS2CBindFlag}, Retrieved)}
             end;
         {error, Reason} ->
             {error, Reason}
@@ -80,10 +87,12 @@ check_client_final_message(ClientFinalmessage, #{client_first_message_bare := Cl
                                                  stored_key                := StoredKey,
                                                  server_key                := ServerKey,
                                                  nonce                     := CachedNonce,
+                                                 gs2_cbind_flag            := GS2CBindFlag,
                                                  algorithm                 := Algorithm}) ->
     case parse_client_final_message(ClientFinalmessage) of
         {ok, #{nonce := Nonce,
-               proof := ClientProof}} ->
+               proof := ClientProof,
+               gs2_cbind_flag := GS2CBindFlag}} ->
             ClientFinalMessageWithoutProof = peek_client_final_message_without_proof(ClientFinalmessage),
             AuthMessage = iolist_to_binary([ ClientFirstMessageBare
                                            , ServerFirstMessage
@@ -98,6 +107,8 @@ check_client_final_message(ClientFinalmessage, #{client_first_message_bare := Cl
                 false ->
                     {error, 'other-error'}
             end;
+        {ok, _} ->
+            {error, 'channel-bindings-dont-match'};
         {error, Reason} ->
             {error, Reason}
     end.
@@ -135,9 +146,9 @@ check_server_final_message(ServerFinalMessage,
                              algorithm                   := Algorithm}) ->
     case parse_server_final_message(ServerFinalMessage) of
         {ok, #{verifier := Verifier}} ->
-            #{nonce := Nonce,
-              salt := Salt,
-              iteration_count := IterationCount} = parse_server_first_message(ServerFirstMessage),
+            {ok, #{nonce := Nonce,
+                   salt := Salt,
+                   iteration_count := IterationCount}} = parse_server_first_message(ServerFirstMessage),
             ClientFinalMessageWithoutProof = client_final_message_without_proof(Nonce),
             AuthMessage = iolist_to_binary([ ClientFirstMessageBare
                                            , ServerFirstMessage
@@ -211,16 +222,22 @@ parse_attributes(Bin, Structure) when is_binary(Bin) ->
     parse_attributes(Chunks, Structure, #{}).
 
 parse_attributes([], [], Acc) ->
-    Acc;
+    {ok, Acc};
 parse_attributes(_, [extensions], Acc) ->
-    Acc;
+    {ok, Acc};
 parse_attributes(Chunks, [extensions, proof], Acc) ->
-    case skip_extensions(Chunks, proof) of
-        {ok, NChunks} ->
-            parse_attributes(NChunks, [proof], Acc);
+    case skip_extensions(Chunks, fun parse_proof/2) of
+        {ok, Attribute, []} ->
+            {ok, maps:merge(Acc, Attribute)};
+        {ok, _, _} ->
+            {error, 'other-error'};
         {error, Reason} ->
             {error, Reason}
     end;
+parse_attributes([<<"m=", _/binary>> | _], [reserved_mext | _], _) ->
+    {error, 'extensions-not-supported'};
+parse_attributes(Chunks, [reserved_mext | More], Acc) ->
+    parse_attributes(Chunks, More, Acc);
 parse_attributes([Chunk | More1], [AttrName | More2], Acc) ->
     case parse_attribute(AttrName, Chunk, Acc) of
         {ok, NAcc} ->
@@ -237,12 +254,12 @@ parse_attribute(authzid, Bin, Attributes) ->
     parse_authzid(Bin, Attributes);
 parse_attribute(username, Bin, Attributes) ->
     parse_username(Bin, Attributes);
-parse_attribute(reserved_mext, Bin, Attributes) ->
-    parse_reserved_mext(Bin, Attributes);
 parse_attribute(nonce, Bin, Attributes) ->
     parse_nonce(Bin, Attributes);
 parse_attribute(channel_binding, Bin, Attributes) ->
     parse_channel_binding(Bin, Attributes);
+parse_attribute(cbind_data, Bin, Attributes) ->
+    parse_cbind_data(Bin, Attributes);
 parse_attribute(salt, Bin, Attributes) ->
     parse_salt(Bin, Attributes);
 parse_attribute(iteration_count, Bin, Attributes) ->
@@ -255,9 +272,9 @@ parse_attribute(server_error_or_verifier, Bin, Attributes) ->
 parse_gs2_cbind_flag(<<"p=", _/binary>>, _) ->
     {error, 'channel-binding-not-supported'};
 parse_gs2_cbind_flag(<<"n">>, Attributes) ->
-    {ok, Attributes};
+    {ok, Attributes#{gs2_cbind_flag => not_supported}};
 parse_gs2_cbind_flag(<<"y">>, Attributes) ->
-    {ok, Attributes};
+    {ok, Attributes#{gs2_cbind_flag => supported_but_not_used}};
 parse_gs2_cbind_flag(_, _) ->
     {error, 'other-error'}.
 
@@ -267,7 +284,7 @@ parse_authzid(<<"a=", AuthzID0/binary>>, Attributes)
   when AuthzID0 =/= <<>> ->
     case replace_escape_sequence(AuthzID0) of
         {ok, AuthzID} ->
-            Attributes#{authzid => AuthzID};
+            {ok, Attributes#{authzid => AuthzID}};
         {error, Reason} ->
             {error, Reason}
     end;
@@ -278,19 +295,11 @@ parse_username(<<"n=", Username0/binary>>, Attributes)
   when Username0 =/= <<>> ->
     case replace_escape_sequence(Username0) of
         {ok, Username} ->
-            Attributes#{username => Username};
+            {ok, Attributes#{username => Username}};
         {error, Reason} ->
             {error, Reason}
     end;
 parse_username(_, _) ->
-    {error, 'other-error'}.
-
-parse_reserved_mext(<<>>, Attributes) ->
-    {ok, Attributes};
-parse_reserved_mext(<<"m=", Value/binary>>, _)
-  when Value =/= <<>> ->
-    {error, 'extensions-not-supported'};
-parse_reserved_mext(_, _) ->
     {error, 'other-error'}.
 
 parse_nonce(<<"r=", Nonce/binary>>, Attributes)
@@ -309,14 +318,24 @@ parse_channel_binding(<<"c=", ChannelBinding0/binary>>, Attributes) ->
     try base64:decode(ChannelBinding0) of
         <<"p=", _/binary>> ->
             {error, 'server-does-support-channel-binding'};
-        _ ->
-            {ok, Attributes}
+        Decoded ->
+            case parse_attributes(Decoded, [gs2_cbind_flag, authzid, cbind_data]) of
+                {ok, Attributes0} ->
+                    {ok, maps:merge(Attributes, Attributes0)};
+                {error, Reason} ->
+                    {error, Reason}
+            end
     catch
         _Class:_Reason ->
             {error, 'invalid-encoding'}
     end;
 parse_channel_binding(_, _) ->
     {error, 'other-error'}.
+
+parse_cbind_data(<<>>, Attributes) ->
+    {ok, Attributes};
+parse_cbind_data(Bin, Attributes) ->
+    {ok, Attributes#{cbind_data => Bin}}.
 
 parse_salt(<<"s=", Salt0/binary>>, Attributes)
   when Salt0 =/= <<>> ->
@@ -372,10 +391,13 @@ parse_server_error_or_verifier(_, _) ->
 
 skip_extensions([], _) ->
     {error, 'other-error'};
-skip_extensions([<<"p=", _/binary>> | _] = Chunks, proof) ->
-    {ok, Chunks};
-skip_extensions([_ | More], AttrName) ->
-    skip_extensions(More, AttrName).
+skip_extensions([Chunk | More], Parser) ->
+    case Parser(Chunk, #{}) of
+        {ok, Attribute} ->
+            {ok, Attribute, More};
+        {error, _Reason} ->
+            skip_extensions(More, Parser)
+    end.
 
 replace_escape_sequence(SaslName) ->
     Chunks = binary:split(SaslName, <<"=">>, [global]),
@@ -392,18 +414,18 @@ replace_escape_sequence([<<"2C">> | More], Acc) ->
     replace_escape_sequence(More, [<<",">> | Acc]);
 replace_escape_sequence([<<"3D">> | More], Acc) ->
     replace_escape_sequence(More, [<<"=">> | Acc]);
-replace_escape_sequence(_, _) ->
-    {error, 'invalid-username-encoding'}.
+replace_escape_sequence([Other | More], Acc) ->
+    replace_escape_sequence(More, [Other | Acc]).
 
 %% client-first-message-bare = [reserved-mext ","] userame "," nonce ["," extensions]
 client_first_message_bare(Username) ->
-    iolist_to_binary(["u=", Username, ",r=", nonce()]).
+    iolist_to_binary(["n=", Username, ",r=", nonce()]).
 
 client_final_message_without_proof(Nonce) ->
-    iolist_to_binary([gs2_header(), "r=", Nonce]).
+    iolist_to_binary(["c=", base64:encode(gs2_header()), ",r=", Nonce]).
 
 client_final_message(Nonce, Proof) ->
-    iolist_to_binary([client_final_message_without_proof(Nonce), "p=", base64:encode(Proof)]).
+    iolist_to_binary([client_final_message_without_proof(Nonce), ",p=", base64:encode(Proof)]).
 
 server_first_message(Nonce, Salt, IterationCount) ->
     iolist_to_binary(["r=", Nonce, ",s=", base64:encode(Salt), ",i=", integer_to_list(IterationCount)]).
@@ -438,6 +460,9 @@ stored_key(Alg, ClientKey) ->
 gs2_header() ->
     gs2_cbind_flag("n") ++ ",,".
 
+%% n: client doesn't support channel binding
+%% y: client does support channel binding but thinks the server does not
+%% p: client requires channel binding
 gs2_cbind_flag({"p", ChannelBindingName}) ->
     lists:concat(["p=", ChannelBindingName]);
 gs2_cbind_flag("n") ->
