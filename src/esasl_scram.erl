@@ -15,7 +15,6 @@
 %%--------------------------------------------------------------------
 -module(esasl_scram).
 
--compile([export_all]).
 -export([generate_authentication_info/2]).
 
 -export([client_first_message/1]).
@@ -24,11 +23,7 @@
         , check_client_final_message/2
         , check_server_first_message/2
         , check_server_final_message/2
-        , parse_client_first_message/1
         ]).
-
-
-
 
 -ifdef(TEST).
 -compile(export_all).
@@ -456,8 +451,6 @@ nonce() ->
 salted_password(Alg, Password, Salt, IterationCount) ->
     {ok, Bin} = pbkdf2:pbkdf2({hmac, Alg}, Password, Salt, IterationCount),
     Bin.
-    %% This seems unnecessary
-    %%pbkdf2:to_hex(Bin).
 
 client_key(Alg, SaltedPassword) ->
     hmac(Alg, SaltedPassword, <<"Client Key">>).

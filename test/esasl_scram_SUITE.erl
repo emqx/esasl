@@ -24,7 +24,14 @@
 
 init_per_suite(Config) ->
     {ok, _} = application:ensure_all_started(esasl),
-    Config.
+    %% Port program dir
+    BinDir = code:lib_dir(esasl) ++ case erlang:system_info(system_architecture) of
+        "aarch64-unknown-linux-gnu" ->
+            "/test/bin/aarch64/";
+        "x86_64-pc-linux-gnu" ->
+             "/test/bin/x86_64/"
+    end,
+    [{bin_dir, BinDir} | Config].
 
 end_per_suite(_Config) ->
     application:stop(esasl).
@@ -32,8 +39,8 @@ end_per_suite(_Config) ->
 all() -> [t_scram, t_interop].
 
 t_scram(_) ->
-    Username = <<"user">>,
-    Password = <<"123456">>,
+    Username = <<"admin">>,
+    Password = <<"public">>,
     IterationCount = 4096,
     Algorithm = sha256,
 
@@ -75,9 +82,9 @@ t_scram(_) ->
         ServerFinalMessage, ClientCache#{algorithm => Algorithm}
     ).
 
-t_interop(_) ->
+t_interop(Config) ->
     process_flag(trap_exit, true),
-    PortProgram = "/home/ubuntu/repo/tmp/scram_cli/target/debug/scram_cli",
+    PortProgram = ?config(bin_dir, Config) ++ "/scram_cli",
     Username = <<"user">>,
     Password = <<"123456">>,
     Algorithm = sha256,
