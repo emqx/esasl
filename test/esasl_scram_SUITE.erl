@@ -25,12 +25,9 @@
 init_per_suite(Config) ->
     {ok, _} = application:ensure_all_started(esasl),
     %% Port program dir
-    BinDir = code:lib_dir(esasl) ++ case erlang:system_info(system_architecture) of
-        "aarch64-unknown-linux-gnu" ->
-            "/test/bin/aarch64/";
-        "x86_64-pc-linux-gnu" ->
-             "/test/bin/x86_64/"
-    end,
+    BinDir = filename:join([code:lib_dir(esasl),
+                            "test/bin/",
+                            hd(string:tokens(erlang:system_info(system_architecture), "-"))]),
     [{bin_dir, BinDir} | Config].
 
 end_per_suite(_Config) ->
