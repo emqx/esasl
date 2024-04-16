@@ -34,8 +34,12 @@ end_per_suite(_Config) ->
     application:stop(esasl).
 
 all() -> [t_scram,
+          t_scram_neg,
           t_interop_kpro_scram,
-          t_interop_rustbase_scram].
+          t_interop_rustbase_scram_neg,
+          t_interop_rustbase_scram,
+          t_interop_kpro_scram_neg
+         ].
 
 t_scram(_) ->
     Username = <<"admin">>,
@@ -81,6 +85,48 @@ t_scram(_) ->
         ServerFinalMessage, ClientCache#{algorithm => Algorithm}
     ).
 
+t_scram_neg(_) ->
+    Username = <<"admin">>,
+    %% WHEN:  Client & Server using different password
+    Password = <<"public">>,
+    Password2 = <<"private">>,
+    IterationCount = 4096,
+    Algorithm = sha256,
+
+    {StoredKey, ServerKey, Salt} = esasl_scram:generate_authentication_info(Password, #{algorithm => Algorithm, iteration_count => IterationCount}),
+    RetrieveFun = fun(_) ->
+                      {ok, #{stored_key => StoredKey,
+                             server_key => ServerKey,
+                             salt => Salt}}
+                  end,
+
+    ClientFirstMessage = esasl_scram:client_first_message(Username),
+
+    ct:pal("ClientFirst: ~p", [ClientFirstMessage]),
+
+    {continue, ServerFirstMessage, ServerCache} =
+        esasl_scram:check_client_first_message(
+            ClientFirstMessage,
+            #{iteration_count => IterationCount,
+              retrieve => RetrieveFun}
+        ),
+
+    ct:pal("ServerFirst: ~p~nStates:~p", [ServerFirstMessage, ServerCache]),
+    {continue, ClientFinalMessage, ClientCache} =
+        esasl_scram:check_server_first_message(
+            ServerFirstMessage,
+            #{client_first_message => ClientFirstMessage,
+              password => Password2,
+              algorithm => Algorithm}
+        ),
+
+    ct:pal("ClientFinal: ~p~n:State~p", [ClientFinalMessage, ClientCache]),
+    %% THEN: validation failed
+    ?assertEqual({error, 'other-error'},
+        esasl_scram:check_client_final_message(
+            ClientFinalMessage, ServerCache#{algorithm => Algorithm}
+        )).
+
 %% @doc interop test with rustbase-scram
 t_interop_rustbase_scram(Config) ->
     process_flag(trap_exit, true),
@@ -91,7 +137,9 @@ t_interop_rustbase_scram(Config) ->
     IterationCount = 4096,
     PortOpenArgs = [Username, Password, atom_to_binary(Algorithm)],
 
-    {StoredKey, ServerKey, Salt} = esasl_scram:generate_authentication_info(Password, #{algorithm => Algorithm, iteration_count => IterationCount}),
+    {StoredKey, ServerKey, Salt}
+        = esasl_scram:generate_authentication_info(Password, #{algorithm => Algorithm,
+                                                               iteration_count => IterationCount}),
 
     RetrieveFun = fun(_) ->
                       {ok, #{stored_key => StoredKey,
@@ -121,6 +169,54 @@ t_interop_rustbase_scram(Config) ->
          ),
     send_to_port(Port, ServerFinalMessage),
     ?assertEqual(<<"AUTH OK">>, recv_from_port(Port)).
+
+
+%% @doc interop test with rustbase-scram, negtive
+t_interop_rustbase_scram_neg(Config) ->
+    process_flag(trap_exit, true),
+    PortProgram = ?config(bin_dir, Config) ++ "/scram_cli",
+    Username = <<"user">>,
+    %% WHEN:  Client & Server using different password
+    Password = <<"123456">>,
+    PortPassword = <<"234567">>,
+    Algorithm = sha256,
+    IterationCount = 4096,
+    PortOpenArgs = [Username, PortPassword, atom_to_binary(Algorithm)],
+
+    {StoredKey, ServerKey, Salt} =
+        esasl_scram:generate_authentication_info(Password,
+                                                 #{algorithm => Algorithm,
+                                                   iteration_count => IterationCount}),
+
+    RetrieveFun = fun(_) ->
+                      {ok, #{stored_key => StoredKey,
+                             server_key => ServerKey,
+                             salt => Salt}}
+                  end,
+
+    Port = open_port({spawn_executable, PortProgram}, [{line, 1024},
+                                                       {args, PortOpenArgs},
+                                                       use_stdio,
+                                                       binary
+                                                      ]),
+
+    ClientFirstMessage = recv_from_port(Port),
+
+    {continue, ServerFirstMessage, ServerCache} =
+        esasl_scram:check_client_first_message(
+          ClientFirstMessage,
+          #{iteration_count => IterationCount,
+            retrieve => RetrieveFun}),
+
+    send_to_port(Port, ServerFirstMessage),
+    ClientFinalMessage = recv_from_port(Port),
+
+    %% THEN: validation failed
+    ?assertEqual({error, 'other-error'},
+        esasl_scram:check_client_final_message(
+          ClientFinalMessage, ServerCache#{algorithm => Algorithm}
+         )),
+    erlang:port_close(Port).
 
 %% @doc interop test with kpro_scram
 t_interop_kpro_scram(_) ->
@@ -154,6 +250,42 @@ t_interop_kpro_scram(_) ->
           ClientFinalMessage, ServerCache#{algorithm => Algorithm}
          ),
     ?assertEqual(ok, kpro_scram:validate(Ctx1, ServerFinalMessage)).
+
+%% @doc interop test with kpro_scram, negtive
+t_interop_kpro_scram_neg(_) ->
+    load_kpro_scram(),
+    Username = <<"user_kpro">>,
+    %% WHEN:  Client & Server using different password
+    Password = <<"kprokafka">>,
+    KproPassword = <<"prokafkak">>,
+    Algorithm = sha256,
+    IterationCount = 4096,
+    {StoredKey, ServerKey, Salt} = esasl_scram:generate_authentication_info(Password, #{algorithm => Algorithm, iteration_count => IterationCount}),
+
+    RetrieveFun = fun(_) ->
+                      {ok, #{stored_key => StoredKey,
+                             server_key => ServerKey,
+                             salt => Salt}}
+                  end,
+
+    Ctx = kpro_scram:init(sha256, Username, KproPassword),
+    ClientFirstMessage = kpro_scram:first(Ctx),
+
+    {continue, ServerFirstMessage, ServerCache} =
+        esasl_scram:check_client_first_message(
+          ClientFirstMessage,
+          #{iteration_count => IterationCount,
+            retrieve => RetrieveFun}),
+
+    Ctx1 = kpro_scram:parse(Ctx, ServerFirstMessage),
+
+    ClientFinalMessage = kpro_scram:final(Ctx1),
+
+    %% THEN: validation failed
+    ?assertEqual({error, 'other-error'},
+        esasl_scram:check_client_final_message(
+          ClientFinalMessage, ServerCache#{algorithm => Algorithm}
+         )).
 
 %% helpers
 recv_from_port(Port) ->
