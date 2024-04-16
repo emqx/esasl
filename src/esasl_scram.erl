@@ -13,7 +13,6 @@
 %% See the License for the specific language governing permissions and
 %% limitations under the License.
 %%--------------------------------------------------------------------
-
 -module(esasl_scram).
 
 -export([generate_authentication_info/2]).
@@ -95,7 +94,9 @@ check_client_final_message(ClientFinalmessage, #{client_first_message_bare := Cl
                gs2_cbind_flag := GS2CBindFlag}} ->
             ClientFinalMessageWithoutProof = peek_client_final_message_without_proof(ClientFinalmessage),
             AuthMessage = iolist_to_binary([ ClientFirstMessageBare
+                                           , ","
                                            , ServerFirstMessage
+                                           , ","
                                            , ClientFinalMessageWithoutProof]),
             ClientSignature = hmac(Algorithm, StoredKey, AuthMessage),
             ClientKey = crypto:exor(ClientProof, ClientSignature),
@@ -123,7 +124,9 @@ check_server_first_message(ServerFirstMessage, #{client_first_message := ClientF
             ClientFirstMessageBare = peek_client_first_message_bare(ClientFirstMessage),
             ClientFinalMessageWithoutProof = client_final_message_without_proof(Nonce),
             AuthMessage = iolist_to_binary([ ClientFirstMessageBare
+                                           , ","
                                            , ServerFirstMessage
+                                           , ","
                                            , ClientFinalMessageWithoutProof]),
             SaltedPassword = salted_password(Algorithm, Password, Salt, IterationCount),
             ClientKey = client_key(Algorithm, SaltedPassword),
@@ -151,7 +154,9 @@ check_server_final_message(ServerFinalMessage,
                    iteration_count := IterationCount}} = parse_server_first_message(ServerFirstMessage),
             ClientFinalMessageWithoutProof = client_final_message_without_proof(Nonce),
             AuthMessage = iolist_to_binary([ ClientFirstMessageBare
+                                           , ","
                                            , ServerFirstMessage
+                                           , ","
                                            , ClientFinalMessageWithoutProof]),
             SaltedPassword = salted_password(Algorithm, Password, Salt, IterationCount),
             ServerKey = server_key(Algorithm, SaltedPassword),
@@ -445,7 +450,7 @@ nonce() ->
 
 salted_password(Alg, Password, Salt, IterationCount) ->
     {ok, Bin} = pbkdf2:pbkdf2({hmac, Alg}, Password, Salt, IterationCount),
-    pbkdf2:to_hex(Bin).
+    Bin.
 
 client_key(Alg, SaltedPassword) ->
     hmac(Alg, SaltedPassword, <<"Client Key">>).
