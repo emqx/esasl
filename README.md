@@ -1,3 +1,3 @@
 # esasl
 
-Simple Authentication and Security Layer
+DEPRECATED! Use https://github.com/kafka4beam/sasl_auth instead.
